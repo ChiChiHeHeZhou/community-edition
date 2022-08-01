@@ -23,10 +23,11 @@ import * as yup from 'yup';
 import { AwsService, AWSVirtualMachine } from '../../../swagger-api';
 import OsImageSelect from '../../../shared/components/FormInputComponents/OsImageSelect/OsImageSelect';
 import PageNotification, { Notification, NotificationStatus } from '../../../shared/components/PageNotification/PageNotification';
+import { getResource } from '../../../views/providers/aws/AwsResources.reducer';
 
 ClarityIcons.addIcons(blockIcon, blocksGroupIcon, clusterIcon);
 
-type AWS_CLUSTER_SETTING_STEP_FIELDS = 'NODE_PROFILE' | 'IMAGE_INFO' | 'CLUSTER_NAME';
+type AWS_CLUSTER_SETTING_STEP_FIELDS = 'NODE_PROFILE' | 'OS_IMAGE' | 'CLUSTER_NAME';
 
 interface MCSettings extends StepProps {
     message?: string;
@@ -59,12 +60,12 @@ const nodeInstanceTypes: NodeInstanceType[] = [
 interface AwsClusterSettingFormInputs {
     CLUSTER_NAME: string;
     NODE_PROFILE: string;
-    IMAGE_INFO: string;
+    OS_IMAGE: string;
 }
 
 function createYupSchemaObject() {
     return {
-        IMAGE_INFO: yupStringRequired('Please select an OS image'),
+        OS_IMAGE: yupStringRequired('Please select an OS image'),
         NODE_PROFILE: nodeInstanceTypeValidation(),
         CLUSTER_NAME: clusterNameValidation(),
     };
@@ -78,11 +79,10 @@ function AwsClusterSettingsStep(props: Partial<MCSettings>) {
     const { handleValueChange, currentStep, deploy, defaultData, message } = props;
     const { awsState } = useContext(AwsStore);
     const awsClusterSettingsFormSchema = yup.object(createYupSchemaObject()).required();
+    const [notification, setNotification] = useState<Notification | null>(null);
     const methods = useForm<AwsClusterSettingFormInputs>({
         resolver: yupResolver(awsClusterSettingsFormSchema),
     });
-    const [notification, setNotification] = useState<Notification | null>(null);
-    const [images, setImages] = useState<AWSVirtualMachine[]>([]);
     const {
         handleSubmit,
         formState: { errors },
@@ -90,13 +90,10 @@ function AwsClusterSettingsStep(props: Partial<MCSettings>) {
         setValue,
     } = methods;
 
-    function dismissAlert() {
-        setNotification(null);
-    }
-
     const setImageParameters = (image) => {
         if (handleValueChange) {
-            handleValueChange(INPUT_CHANGE, 'IMAGE_INFO', image, currentStep, errors);
+            handleValueChange(INPUT_CHANGE, 'OS_IMAGE', image, currentStep, errors);
+            setValue('OS_IMAGE', image.name);
         }
     };
 
@@ -106,19 +103,7 @@ function AwsClusterSettingsStep(props: Partial<MCSettings>) {
         }
     };
 
-    useEffect(() => {
-        try {
-            AwsService.getAwsosImages(awsState[STORE_SECTION_FORM].REGION).then((data) => {
-                setImages(data);
-                setImageParameters(data[0]);
-            });
-        } catch (e) {
-            setNotification({
-                status: NotificationStatus.DANGER,
-                message: `Unable to retrieve OS Images: ${e}`,
-            } as Notification);
-        }
-    }, [awsState[STORE_SECTION_FORM].REGION]);
+    const osImages = (getResource('osImages', awsState) || []) as AWSVirtualMachine[];
 
     let initialSelectedInstanceTypeId = awsState[STORE_SECTION_FORM].NODE_PROFILE;
 
@@ -127,6 +112,10 @@ function AwsClusterSettingsStep(props: Partial<MCSettings>) {
         setValue('NODE_PROFILE', initialSelectedInstanceTypeId);
     }
     const [selectedInstanceTypeId, setSelectedInstanceTypeId] = useState(initialSelectedInstanceTypeId);
+
+    function dismissAlert() {
+        setNotification(null);
+    }
 
     const onFieldChange = (data: string, field: AWS_CLUSTER_SETTING_STEP_FIELDS) => {
         if (handleValueChange) {
@@ -144,8 +133,12 @@ function AwsClusterSettingsStep(props: Partial<MCSettings>) {
         onFieldChange(clusterName, 'CLUSTER_NAME');
     };
 
-    const onOsImageSelected = (clusterName: string) => {
-        onFieldChange(clusterName, 'IMAGE_INFO');
+    const onOsImageSelected = (imageName: string) => {
+        osImages.some((image) => {
+            if (image.name === imageName) {
+                setImageParameters(image);
+            }
+        });
     };
 
     return (
@@ -176,15 +169,14 @@ function AwsClusterSettingsStep(props: Partial<MCSettings>) {
                 </div>
                 <div cds-layout="col:12">
                     <OsImageSelect
-                        osImageTitle={'Amazon Machine Image(AMI)'}
-                        images={images}
-                        field={'IMAGE_INFO'}
+                        osImageTitle={'Amazon Machine Image (AMI)'}
+                        images={osImages}
+                        field={'OS_IMAGE'}
                         errors={errors}
                         register={register}
                         onOsImageSelected={onOsImageSelected}
                     />
                 </div>
-
                 <div cds-layout="grid col:12 p-t:lg">
                     <CdsButton cds-layout="col:start-1" status="success" onClick={handleSubmit(handleMCCreation)}>
                         <CdsIcon shape="cluster" size="sm"></CdsIcon>
